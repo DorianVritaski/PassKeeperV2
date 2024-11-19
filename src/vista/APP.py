@@ -1,16 +1,21 @@
 import tkinter as tk
-from tkinter import messagebox, ttk
+import secrets
+import string
+import pyperclip  # Librería para copiar al portapapeles
+import json
+import os
+from tkinter import messagebox, ttk, filedialog
 from sqlalchemy.orm import sessionmaker
 from src.modelo.modelo import engine
 from src.logica.CRUD import UsuarioCRUD, Contraseniacrud
-from tkinter import ttk
-from datetime import datetime
 
 # Configurar sesión de SQLAlchemy
 Session = sessionmaker(bind=engine)
 session = Session()
 usuario_crud = UsuarioCRUD(session)
-contrasenia_crud = Contraseniacrud(session)
+
+# Archivo para guardar contraseñas generadas
+PASSWORDS_FILE = 'generated_passwords.json'
 
 class LoginWindow:
     def __init__(self, root):
@@ -48,8 +53,7 @@ class LoginWindow:
             sesion = usuario_crud.iniciar_sesion(email, password)
             if sesion:
                 messagebox.showinfo("Éxito", "Inicio de sesión exitoso.")
-                self.root.destroy()  # Cierra la ventana de login
-                GestionContrasenasWindow(sesion.id_usuario)  # Pasa el id_usuario al abrir la ventana de contraseñas
+                self.root.destroy()
             else:
                 messagebox.showerror("Error", "Correo o contraseña incorrectos.")
         except Exception as e:
@@ -58,14 +62,12 @@ class LoginWindow:
     def open_register_window(self):
         RegisterWindow(self.root)
 
-
 class RegisterWindow:
     def __init__(self, parent):
         self.window = tk.Toplevel(parent)
         self.window.title("Registrar Usuario")
-        self.window.geometry("300x300")
+        self.window.geometry("300x350")
 
-        # Campos para registrar un nuevo usuario
         self.label_username = tk.Label(self.window, text="Nombre de Usuario:")
         self.label_username.pack(pady=5)
         self.entry_username = tk.Entry(self.window, width=30)
@@ -81,13 +83,20 @@ class RegisterWindow:
         self.entry_password = tk.Entry(self.window, width=30, show="*")
         self.entry_password.pack(pady=5)
 
-        self.label_rol = tk.Label(self.window, text="Rol (ejemplo: admin, usuario):")
+        # Botón para generar contraseña segura
+        self.button_generate_password = tk.Button(self.window, text="Generar Contraseña", command=self.open_password_generator)
+        self.button_generate_password.pack(pady=5)
+
+        self.label_rol = tk.Label(self.window, text="Rol (admin/usuario):")
         self.label_rol.pack(pady=5)
         self.entry_rol = tk.Entry(self.window, width=30)
         self.entry_rol.pack(pady=5)
 
         self.button_register = tk.Button(self.window, text="Registrar", command=self.register_user)
         self.button_register.pack(pady=10)
+
+    def open_password_generator(self):
+        PasswordGeneratorWindow(self.window, self.entry_password)
 
     def register_user(self):
         nombre_usuario = self.entry_username.get()
@@ -106,162 +115,93 @@ class RegisterWindow:
         except Exception as e:
             messagebox.showerror("Error", f"No se pudo registrar el usuario: {e}")
 
+class PasswordGeneratorWindow:
+    def __init__(self, parent, target_entry):
+        self.target_entry = target_entry
+        self.window = tk.Toplevel(parent)
+        self.window.title("Generar Contraseña Segura")
+        self.window.geometry("350x250")
 
-class GestionContrasenasWindow:
-    def __init__(self, usuario_id):
-        self.usuario_id = usuario_id  # Recibe el id del usuario
-        self.root = tk.Tk()
-        self.root.title("Gestión de Contraseñas")
-        self.root.geometry("800x400")  # Ajusté el tamaño para más espacio
+        tk.Label(self.window, text="Longitud de la contraseña:").pack(pady=5)
+        self.entry_length = tk.Entry(self.window, width=5)
+        self.entry_length.insert(0, "12")  # Valor por defecto
+        self.entry_length.pack(pady=5)
 
-        # Tabla de contraseñas
-        self.tree = ttk.Treeview(self.root, columns=(
-            "ID", "Servicio", "Usuario", "Contraseña Encriptada", "Fecha de Creación", "Última Modificación", "Nota"),
-                                 show="headings")
+        self.button_generate = tk.Button(self.window, text="Generar", command=self.generate_password)
+        self.button_generate.pack(pady=5)
 
-        # Definir encabezados de las columnas
-        self.tree.heading("ID", text="ID")
-        self.tree.heading("Servicio", text="Servicio")
-        self.tree.heading("Usuario", text="Usuario")
-        self.tree.heading("Contraseña Encriptada", text="Contraseña Encriptada")
-        self.tree.heading("Fecha de Creación", text="Fecha de Creación")
-        self.tree.heading("Última Modificación", text="Última Modificación")
-        self.tree.heading("Nota", text="Nota")
+        self.generated_password = tk.StringVar()
+        self.label_password = tk.Label(self.window, textvariable=self.generated_password, wraplength=250, fg="blue")
+        self.label_password.pack(pady=5)
 
-        # Ajustar el ancho de las columnas
-        self.tree.column("ID", width=50)
-        self.tree.column("Servicio", width=150)
-        self.tree.column("Usuario", width=150)
-        self.tree.column("Contraseña Encriptada", width=150)
-        self.tree.column("Fecha de Creación", width=150)
-        self.tree.column("Última Modificación", width=150)
-        self.tree.column("Nota", width=200)
+        # Nuevos botones para copiar y guardar
+        button_frame = tk.Frame(self.window)
+        button_frame.pack(pady=10)
 
-        # Mostrar la tabla
-        self.tree.pack(fill="both", expand=True)
+        self.button_copy = tk.Button(button_frame, text="Copiar al Portapapeles", command=self.copy_to_clipboard)
+        self.button_copy.pack(side=tk.LEFT, padx=5)
 
-        # Botones
-        frame_botones = tk.Frame(self.root)
-        frame_botones.pack()
+        self.button_use = tk.Button(button_frame, text="Usar en Formulario", command=self.use_password)
+        self.button_use.pack(side=tk.LEFT, padx=5)
 
-        tk.Button(frame_botones, text="Agregar", command=self.agregar_contrasena).pack(side="left", padx=10)
-        tk.Button(frame_botones, text="Editar", command=self.editar_contrasena).pack(side="left", padx=10)
-        tk.Button(frame_botones, text="Eliminar", command=self.eliminar_contrasena).pack(side="left", padx=10)
+        self.button_save = tk.Button(button_frame, text="Guardar Contraseña", command=self.save_password)
+        self.button_save.pack(side=tk.LEFT, padx=5)
 
-        # Cargar contraseñas
-        self.cargar_contrasenas()
-
-        self.root.mainloop()
-
-    def cargar_contrasenas(self):
-        """Carga las contraseñas del usuario desde la base de datos"""
-        # Limpiar la tabla antes de cargar datos
-        for item in self.tree.get_children():
-            self.tree.delete(item)
-
-        # Obtener contraseñas de la base de datos
-        contrasenas = contrasenia_crud.obtener_contrasenias_usuario(self.usuario_id)
-
-        # Insertar los datos en la tabla
-        for contrasenia in contrasenas:
-            self.tree.insert("", "end", values=(
-                contrasenia.id_contrasenia,
-                contrasenia.servicio,
-                contrasenia.nombre_usuario_servicio,
-                contrasenia.contrasenia_encriptada,  # Columna de Contraseña Encriptada
-                contrasenia.fecha_creacion.strftime("%Y-%m-%d %H:%M:%S") if contrasenia.fecha_creacion else "",
-                # Fecha de creación
-                contrasenia.ultima_modificacion.strftime(
-                    "%Y-%m-%d %H:%M:%S") if contrasenia.ultima_modificacion else "",  # Última modificación
-                contrasenia.nota or ""  # Nota (si no hay nota, colocar vacío)
-            ))
-
-    def agregar_contrasena(self):
-        def guardar_contrasena():
-            servicio = entry_servicio.get()
-            nombre_usuario_servicio = entry_usuario.get()
-            contrasenia = entry_contrasenia.get()
-            nota = text_nota.get("1.0", tk.END).strip()
-
-            if not servicio or not nombre_usuario_servicio or not contrasenia:
-                messagebox.showwarning("Advertencia", "Por favor, complete todos los campos obligatorios.")
-                return
-
-            try:
-                # Crear la nueva contraseña en la base de datos
-                contrasenia_crud.create_contrasenia(
-                    id_usuario=self.usuario_id,
-                    servicio=servicio,
-                    nombre_usuario_servicio=nombre_usuario_servicio,
-                    contrasenia_encriptada=contrasenia,  # Aquí deberías encriptar la contraseña
-                    nota=nota
-                )
-                messagebox.showinfo("Éxito", "Contraseña agregada correctamente.")
-                self.cargar_contrasenas()
-                ventana_agregar.destroy()
-            except Exception as e:
-                messagebox.showerror("Error", f"No se pudo agregar la contraseña: {e}")
-
-        # Crear una nueva ventana para añadir una contraseña
-        ventana_agregar = tk.Toplevel(self.root)
-        ventana_agregar.title("Agregar Contraseña")
-        ventana_agregar.geometry("400x400")
-
-        # Campos de entrada
-        tk.Label(ventana_agregar, text="Servicio:").pack(pady=5)
-        entry_servicio = tk.Entry(ventana_agregar, width=30)
-        entry_servicio.pack(pady=5)
-
-        tk.Label(ventana_agregar, text="Usuario del Servicio:").pack(pady=5)
-        entry_usuario = tk.Entry(ventana_agregar, width=30)
-        entry_usuario.pack(pady=5)
-
-        tk.Label(ventana_agregar, text="Contraseña:").pack(pady=5)
-        entry_contrasenia = tk.Entry(ventana_agregar, width=30, show="*")
-        entry_contrasenia.pack(pady=5)
-
-        tk.Label(ventana_agregar, text="Nota (opcional):").pack(pady=5)
-        text_nota = tk.Text(ventana_agregar, height=5, width=40)
-        text_nota.pack(pady=5)
-
-        # Botón para guardar
-        tk.Button(ventana_agregar, text="Guardar", command=guardar_contrasena).pack(pady=10)
-        pass
-
-    def editar_contrasena(self):
-        # Implementar ventana para editar contraseña seleccionada
-        pass
-
-    def eliminar_contrasena(self):
+    def generate_password(self):
         try:
-            # Verificar si hay una contraseña seleccionada
-            seleccion = self.tree.focus()  # Obtener la selección en la tabla
-            if not seleccion:
-                messagebox.showwarning("Advertencia", "Por favor, seleccione una contraseña para eliminar.")
+            length = int(self.entry_length.get())
+            if length < 6:
+                messagebox.showwarning("Advertencia", "La contraseña debe tener al menos 6 caracteres.")
                 return
+            characters = string.ascii_letters + string.digits + string.punctuation
+            password = ''.join(secrets.choice(characters) for _ in range(length))
+            self.generated_password.set(password)
+        except ValueError:
+            messagebox.showerror("Error", "Por favor, ingrese un valor numérico válido para la longitud.")
 
-            # Obtener datos de la contraseña seleccionada
-            item_seleccionado = self.tree.item(seleccion)
-            contrasena_id = item_seleccionado["values"][0]  # Suponiendo que el ID es la primera columna
+    def copy_to_clipboard(self):
+        password = self.generated_password.get()
+        if password:
+            pyperclip.copy(password)
+            messagebox.showinfo("Éxito", "Contraseña copiada al portapapeles.")
+        else:
+            messagebox.showwarning("Advertencia", "Primero genere una contraseña.")
 
-            # Confirmación
-            confirmacion = messagebox.askyesno("Confirmar eliminación",
-                                               "¿Está seguro de que desea eliminar esta contraseña?")
-            if not confirmacion:
-                return
+    def use_password(self):
+        password = self.generated_password.get()
+        if password:
+            self.target_entry.delete(0, tk.END)
+            self.target_entry.insert(0, password)
+            messagebox.showinfo("Éxito", "Contraseña insertada en el formulario.")
+        else:
+            messagebox.showwarning("Advertencia", "Primero genere una contraseña.")
 
-            # Eliminar contraseña en la base de datos
+    def save_password(self):
+        password = self.generated_password.get()
+        if password:
+            # Guardar la contraseña en un archivo JSON
             try:
-                contrasenia_crud.delete_contrasenia(contrasena_id)
-                messagebox.showinfo("Éxito", "La contraseña ha sido eliminada correctamente.")
-                self.cargar_contrasenas()  # Refrescar la tabla después de eliminar
+                # Si el archivo no existe, inicializa una lista vacía
+                if not os.path.exists(PASSWORDS_FILE):
+                    with open(PASSWORDS_FILE, 'w') as f:
+                        json.dump([], f)
+
+                # Leer contraseñas existentes
+                with open(PASSWORDS_FILE, 'r') as f:
+                    passwords = json.load(f)
+
+                # Agregar nueva contraseña
+                passwords.append(password)
+
+                # Guardar contraseñas actualizadas
+                with open(PASSWORDS_FILE, 'w') as f:
+                    json.dump(passwords, f, indent=4)
+
+                messagebox.showinfo("Éxito", "Contraseña guardada correctamente.")
             except Exception as e:
-                messagebox.showerror("Error", f"No se pudo eliminar la contraseña: {e}")
-
-        except Exception as e:
-            messagebox.showerror("Error", f"Hubo un problema al intentar eliminar la contraseña: {e}")
-            pass
-
+                messagebox.showerror("Error", f"No se pudo guardar la contraseña: {e}")
+        else:
+            messagebox.showwarning("Advertencia", "Primero genere una contraseña.")
 
 if __name__ == "__main__":
     root = tk.Tk()
